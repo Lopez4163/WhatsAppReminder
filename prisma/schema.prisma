@@ -1,14 +1,163 @@
 generator client {
   provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
 }
 
-model User {
+//
+// ENUMS (fixed set of allowed values)
+//
+
+enum AppointmentStatus {
+  scheduled
+  reminded
+  confirmed
+  needs_reschedule
+  cancelled
+  no_response
+}
+
+enum MessageChannel {
+  sms
+  email
+}
+
+enum MessageStatus {
+  queued
+  sent
+  failed
+}
+
+//
+// MODELS (each model = a database table)
+//
+
+model Business {
   id        String   @id @default(cuid())
-  email     String   @unique
-  name      String?
+  name      String
+  timezone  String   @default("America/Bogota")
   createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  users        User[]
+  customers    Customer[]
+  appointments Appointment[]
+  messages     Message[]
+  optOuts      OptOut[]
+
+  @@index([name])
+}
+
+model User {
+  id         String   @id @default(cuid())
+  businessId String
+  email      String
+  name       String?
+  role       String   @default("admin")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  // Same email can exist across businesses, but not twice in one business
+  @@unique([businessId, email])
+  @@index([businessId])
+}
+
+model Customer {
+  id         String   @id @default(cuid())
+  businessId String
+  name       String
+  phoneE164  String?  // +15551234567
+  email      String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business     Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointments Appointment[]
+  messages     Message[]
+  optOuts      OptOut[]
+
+  @@index([businessId])
+  @@index([phoneE164])
+  @@index([email])
+}
+
+model Appointment {
+  id         String            @id @default(cuid())
+  businessId String
+  customerId String
+
+  title      String
+  startsAt   DateTime
+  status     AppointmentStatus @default(scheduled)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  messages   Message[]
+
+  @@index([businessId])
+  @@index([customerId])
+  @@index([startsAt])
+  @@index([status])
+}
+
+model Message {
+  id            String         @id @default(cuid())
+  businessId    String
+  appointmentId String?
+  customerId    String?
+
+  channel       MessageChannel
+  status        MessageStatus  @default(queued)
+
+  to            String         // phone or email
+  body          String
+
+  scheduledFor  DateTime?
+  sentAt        DateTime?
+
+  provider      String?        // e.g. "twilio"
+  providerMsgId String?
+  error         String?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  business      Business     @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  appointment   Appointment? @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  customer      Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([businessId])
+  @@index([appointmentId])
+  @@index([customerId])
+  @@index([status])
+  @@index([scheduledFor])
+}
+
+model OptOut {
+  id         String         @id @default(cuid())
+  businessId String
+  customerId String?
+
+  channel    MessageChannel
+  value      String         // phoneE164 or email (normalized)
+  reason     String?
+  createdAt  DateTime       @default(now())
+
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  // Prevent duplicate opt-outs for same business/channel/value
+  @@unique([businessId, channel, value])
+
+  @@index([businessId])
+  @@index([customerId])
 }
